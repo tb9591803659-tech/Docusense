@@ -34,12 +34,52 @@ DocuSense is built around the opposite idea:
 | "Trust me" confidence | **Evidence confidence** based on retrieval signals, not vibes |
 | Trusts whatever the model says | **Validates** every citation and conflict against the source text |
 
-## See it in 60 seconds
+## Try it in 5 easy steps
 
-1. Open DocuSense and click **Load NovaTech demo workspace**. Five fictional HR documents get indexed.
-2. Ask **"What is the parental leave policy?"**: the Employee Handbook says **12 weeks**, the HR Policy says **16 weeks**. DocuSense flags the conflict, cites both pages, and states that no authoritative source exists.
-3. Ask **"What is NovaTech's policy for employees working on Mars?"**: it refuses, with low confidence and zero invented citations.
-4. Click any `[n]` in an answer to jump to the evidence behind it.
+No documents of your own needed. DocuSense comes with a fake company called **NovaTech** so you can see everything working right away.
+
+**Step 1: Start the app**
+Open two terminals and run one command in each (full setup is in [Quick start](#quick-start)):
+
+```bash
+# Terminal 1
+cd backend && uvicorn app.main:app --reload --port 8000
+
+# Terminal 2
+cd frontend && npm run dev
+```
+
+Then open **http://localhost:3000** in your browser.
+
+**Step 2: Load the demo**
+Click the **Load NovaTech demo workspace** button. After a few seconds, 5 documents are ready.
+
+**Step 3: Ask a question that has a conflict**
+Click the suggested question, or type it:
+
+> What is the parental leave policy?
+
+You will see:
+- an answer that says the documents **disagree**
+- a **Conflict** card: the Handbook says **12 weeks**, the HR Policy says **16 weeks**
+- an **Evidence** panel on the right showing the exact pages and quotes
+
+DocuSense will not pick a winner for you. It shows you both sources.
+
+**Step 4: Check the proof**
+Click any blue **[1]** or **[2]** in the answer. The matching evidence card lights up. That is how you verify the answer yourself.
+
+**Step 5: Ask something it cannot know**
+
+> What is NovaTech's policy for employees working on Mars?
+
+DocuSense answers **"Insufficient evidence"** with low confidence and no made-up sources. A normal chatbot would guess here.
+
+That's the whole idea: **answers you can check, conflicts you can see, and honesty when the documents don't say.**
+
+**Want to use your own files?** Go to **Documents**, drag in PDF, Word or text files, wait for the green check, then go back and ask away.
+
+---
 
 ## Features
 
