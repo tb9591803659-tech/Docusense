@@ -1,101 +1,184 @@
+<div align="center">
+
 # ◈ DocuSense AI
-**Investigate documents. Follow the evidence.**
 
-An evidence-grounded multi-document investigation workspace. Upload PDFs, DOCX and TXT files, ask questions, and get answers
-that link back to exact pages and quotes, with conflicts between sources surfaced instead of hidden, and an explicit
-"insufficient evidence" outcome instead of a guess.
+### Investigate documents. Follow the evidence.
 
-> Status: **backend complete and tested; UI is a deliberately basic first pass** (functional, minimal styling) so the
-> full premium UI can be designed next on a proven API.
+**DocuSense doesn't just answer. It shows you why.**
+
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)
+![FAISS](https://img.shields.io/badge/FAISS-vector%20search-4B8BBE)
+![Claude](https://img.shields.io/badge/LLM-Claude-D97757)
+![Status](https://img.shields.io/badge/status-hackathon%20build-6ea8fe)
+
+<!-- Replace with a real screenshot or GIF once you record one -->
+<img src="docs/hero.png" alt="DocuSense AI investigation workspace" width="880">
+
+</div>
+
+---
+
+## The problem
+
+Ask a chatbot about your company's documents and you get a confident paragraph with no way to check it. Worse, when two documents **disagree**, it quietly picks one.
+
+DocuSense is built around the opposite idea:
+
+| Typical RAG chatbot | DocuSense |
+|---|---|
+| Fluent answer, vague sources | Every claim links to **document, page, section and quote** |
+| Silently merges contradictions | **Surfaces conflicts** and refuses to pick a winner |
+| Guesses when it doesn't know | Returns **"insufficient evidence"** instead |
+| "Trust me" confidence | **Evidence confidence** based on retrieval signals, not vibes |
+| Trusts whatever the model says | **Validates** every citation and conflict against the source text |
+
+## See it in 60 seconds
+
+1. Open DocuSense and click **Load NovaTech demo workspace**. Five fictional HR documents get indexed.
+2. Ask **"What is the parental leave policy?"**: the Employee Handbook says **12 weeks**, the HR Policy says **16 weeks**. DocuSense flags the conflict, cites both pages, and states that no authoritative source exists.
+3. Ask **"What is NovaTech's policy for employees working on Mars?"**: it refuses, with low confidence and zero invented citations.
+4. Click any `[n]` in an answer to jump to the evidence behind it.
 
 ## Features
-- Upload (multi-file), PDF/DOCX/TXT/MD extraction with page numbers, section-aware chunking
-- Real ingestion stages with measured timings (uploading, extracting, chunking, embedding, indexing)
-- Semantic retrieval (MiniLM + FAISS), de-duplicated and diversified across documents
-- Grounded answers via an LLM using forced structured output, then **server-side validation** of every citation and conflict
-- Deterministic **conflict detection** (e.g. 12 vs 16 weeks) that never picks a winner
-- **Insufficient-evidence** handling, and "evidence confidence" (high/medium/low) computed from retrieval signals
-- Search, recent investigations (persisted), save/unsave, stats, health, one-click NovaTech demo workspace
+
+- **Multi-document ingestion**: PDF, DOCX, TXT/MD, multi-file upload, page-aware extraction, honest per-stage timings
+- **Semantic retrieval**: `all-MiniLM-L6-v2` embeddings + FAISS, de-duplicated and diversified across documents
+- **Grounded answers**: the LLM is forced into structured output and may only use the numbered evidence it is given
+- **Citation validation**: invented quotes are caught and replaced with real text from the cited chunk
+- **Conflict detection**: deterministic detection of contradicting quantities (e.g. 12 vs 16 weeks) plus LLM-found conflicts that are verified before display
+- **Uncertainty handling**: insufficient-evidence outcome, an unsupported-entity guard, and capped confidence when sources disagree
+- **Investigation workspace**: answer card, confidence badge, clickable citations, evidence panel with relevance scores
+- **Conflicts page**, document search, document management, persisted recent investigations, save/unsave
+- **Cinematic UI layer**: a live 3D evidence constellation, orbiting loading animation, tilt-and-glare evidence cards, page transitions (respects reduced-motion)
+- **Safe by default**: sanitised filenames, type allow-list, upload cap, secrets only in `.env`, no stack traces to users
 
 ## Architecture
+
 ```mermaid
 flowchart LR
-  UI[Next.js UI] -->|REST| API[FastAPI]
-  API --> ING[Ingestion: extract, chunk, embed]
-  ING --> ST[(JSON metadata + uploads)]
-  ING --> IDX[(FAISS / vectors.npy)]
-  API --> RET[Retrieval + dedupe]
+  UI["Next.js UI"] -->|REST| API["FastAPI"]
+  API --> ING["Ingestion<br/>extract → chunk → embed"]
+  ING --> STORE[("JSON metadata<br/>+ uploads")]
+  ING --> IDX[("FAISS index<br/>+ vectors.npy")]
+  API --> RET["Retrieval<br/>score · dedupe · diversify"]
   RET --> IDX
-  RET --> GUARD[Entity guard + conflict detector]
-  GUARD --> LLM[Anthropic API]
-  LLM --> VAL[Citation + conflict validation]
-  VAL --> CONF[Evidence confidence]
+  RET --> GUARD["Entity guard<br/>+ conflict detector"]
+  GUARD --> LLM["Claude<br/>(structured output)"]
+  LLM --> VAL["Validate citations<br/>and conflicts"]
+  VAL --> CONF["Evidence confidence"]
   CONF --> API
 ```
 
-## AI pipeline
-1. **Retrieve**: embed the question, search the index within the chosen scope, drop hits under the relevance threshold, de-duplicate, cap chunks per document.
-2. **Guard**: capitalised terms in the question (e.g. "Mars") that appear nowhere in the retrieved evidence mark the question as unsupported. This is a simple, transparent heuristic, not a classifier.
-3. **Conflicts (deterministic)**: sentences from *different* documents stating the same unit of quantity with different values and near-identical surrounding text are clustered into a conflict.
-4. **Generate**: the LLM must answer only from numbered evidence blocks via a forced tool call (answer, citations, conflicts, insufficient flag).
-5. **Validate**: citations must reference real evidence; quotes must appear verbatim in the cited chunk, otherwise they are replaced by a real sentence from that chunk (`quote_verified=false`). LLM conflict claims are checked against the evidence and dropped if unsupported. Dangling `[n]` markers are removed.
-6. **Confidence**: `low` if insufficient/uncited/below threshold; `medium` if sources conflict (conflict caps at medium); otherwise by top retrieval score; never higher than the LLM's own rating. It is a label for evidence strength, not a probability.
+## How an investigation works
 
-**Extractive mode:** with no `ANTHROPIC_API_KEY`, the API still works but returns quoted sentences from the evidence instead of a written answer. Responses say `meta.mode = "extractive"` and the UI labels it.
+```text
+Question
+  │
+  ├─ 1  Embed question, search FAISS within scope, apply relevance threshold
+  ├─ 2  De-duplicate and cap chunks per document for source diversity
+  ├─ 3  Guard: named terms (e.g. "Mars") that appear nowhere in the evidence → insufficient
+  ├─ 4  Detect conflicts: same unit, different value, same sentence shape, different documents
+  ├─ 5  LLM answers from numbered evidence only (forced tool call, temperature 0)
+  ├─ 6  Verify: quotes must exist in the cited chunk, conflict claims must exist in the evidence
+  └─ 7  Confidence: low / medium / high. Conflicts can never score high.
+```
 
-## Setup
+**Evidence confidence is not a probability.** It describes how strongly the retrieved evidence supports the answer.
+
+No API key? The API still works in a clearly labelled **extractive mode** that quotes the evidence instead of writing an answer. It never fakes AI output.
+
+## Quick start
+
 ```bash
-# backend
+# 1. Backend
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/Scripts/activate      # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env            # add ANTHROPIC_API_KEY
-uvicorn app.main:app --reload   # http://localhost:8000/docs
+cp .env.example .env               # add ANTHROPIC_API_KEY
+python -m pytest                   # run the test suite
+uvicorn app.main:app --reload --port 8000
 
-# frontend (new terminal)
+# 2. Frontend (new terminal)
 cd frontend
 cp .env.example .env.local
-npm install && npm run dev      # http://localhost:3000
+npm install
+npm run dev                        # http://localhost:3000
 ```
-First run with `sentence-transformers` downloads `all-MiniLM-L6-v2` (needs internet once). Open the app, click **Load NovaTech demo workspace**.
+
+Check `http://localhost:8000/health`. You want `embedding.semantic: true` and `llm.configured: true`. The first run downloads the MiniLM model.
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | none | Enables LLM-written answers (backend only) |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Model used for answers |
+| `EMBEDDING_BACKEND` | `auto` | `auto`, `sentence-transformers`, or `hashing` (lexical fallback) |
+| `TOP_K` | `6` | Evidence chunks per question |
+| `MIN_SCORE` | embedder default | Relevance threshold override |
+| `DATA_DIR` | `./data` | Where documents, metadata and the index live |
+| `MAX_UPLOAD_MB` | `25` | Upload size cap |
+| `CORS_ORIGINS` | `http://localhost:3000` | Allowed frontend origins |
 
 ## API
+
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | status, embedder, index, LLM configured |
-| POST | `/documents/upload` | multipart `files` (multiple); per-file result + stage timings |
-| GET / GET / DELETE | `/documents`, `/documents/{id}`, `/documents/{id}` | list, detail with chunks, delete |
-| POST | `/questions` | investigate: `{question, top_k?, min_score?, document_ids?, collection?}` |
-| POST | `/search` | exact + semantic search with page/snippet |
-| GET | `/conflicts`, `/stats` | corpus-wide conflicts; real counts |
-| GET / PATCH / DELETE | `/investigations[/{id}]` | history; `PATCH {saved}` to save |
-| POST | `/demo/load` | index the five NovaTech documents |
+| `GET` | `/health` | Status, embedder, index, LLM configured |
+| `POST` | `/documents/upload` | Multi-file upload with per-file results and stage timings |
+| `GET` `DELETE` | `/documents`, `/documents/{id}` | List, inspect (with chunks), delete |
+| `POST` | `/questions` | Run an investigation |
+| `POST` | `/search` | Exact + semantic search with page and snippet |
+| `GET` | `/conflicts`, `/stats` | Corpus-wide conflicts and real counts |
+| `GET` `PATCH` `DELETE` | `/investigations[/{id}]` | History, save, remove |
+| `POST` | `/demo/load` | Index the NovaTech demo documents |
+
+Interactive docs at `http://localhost:8000/docs`.
+
+## Tech stack
+
+**Backend**: Python, FastAPI, Pydantic, sentence-transformers, FAISS, pypdf, python-docx, scikit-learn, Anthropic API
+**Frontend**: Next.js 14, React, TypeScript, canvas-based 3D, plain CSS
+**Storage**: local filesystem with JSON and a persisted vector index, behind small interfaces (`store.py`, `index.py`) so they can be swapped for object storage or a database
 
 ## Testing
+
 ```bash
-cd backend && python -m pytest        # or: python -m unittest discover -s tests -t .
+cd backend && python -m pytest
 ```
-Covers extraction (real generated PDF + DOCX + TXT, corrupt/empty/unsupported), chunking, embeddings/index (persistence, deletion), retrieval, citation snapping, LLM conflict validation, LLM failure, insufficient evidence, scope filtering, and the demo scenarios (12 vs 16 weeks; Mars refusal). API tests run when FastAPI is installed.
 
-## Deployment
-- **Frontend → Vercel**: root `frontend/`, env `NEXT_PUBLIC_API_URL=https://<backend>`.
-- **Backend → Render / Railway / Fly.io**: root `backend/`, build `pip install -r requirements.txt`, start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`; set `ANTHROPIC_API_KEY`, `CORS_ORIGINS=https://<your-vercel-app>`.
-- **Storage caveat:** data is on the local filesystem (JSON + vectors). Most platforms have **ephemeral disks**, so attach a persistent volume mounted at `DATA_DIR` or accept that data resets on redeploy. This is not production-grade storage; `app/store.py` and `app/index.py` are the two seams to replace with object storage / a database.
-- Memory: `sentence-transformers` needs roughly 500 MB+ RAM; use a plan with room, or set `EMBEDDING_BACKEND=hashing` (lexical, lower quality).
+Covers extraction (real generated PDF, DOCX and TXT, plus corrupt, empty and unsupported files), chunking, index persistence and deletion, retrieval and scoping, citation snapping, rejection of invented LLM claims, LLM failure handling, the 12-vs-16-week conflict, the Mars refusal, and the HTTP API.
 
-## Security
-Filenames sanitised; extension allow-list; upload size cap; files stored under generated ids and never executed; secrets only in `.env`; the API key never reaches the browser; no stack traces returned. There is **no authentication**: do not expose a public instance with sensitive documents.
+## Honest limitations
 
-## Known limitations
-- Conflict detection is deterministic only for **quantities with units**; other contradictions rely on the LLM (validated, but best-effort).
-- The unsupported-entity guard only catches capitalised terms; a vague unanswerable question may still return low-relevance evidence (confidence will be low).
-- TXT/DOCX page numbers are estimated unless the TXT uses form-feed page breaks (`page_basis` reports which).
-- Scanned PDFs have no OCR and are rejected with a clear message.
-- Single-process JSON storage: fine for a demo, not for concurrent multi-user use.
-- The UI is a first pass: no collections UI, document viewer, insights page, settings page, command palette or dark/light toggle yet.
+- Deterministic conflict detection covers **quantities with units**. Other contradictions depend on the LLM, whose claims are verified but best-effort.
+- The unsupported-entity guard only catches capitalised terms. Vague unanswerable questions rely on relevance scores.
+- DOCX and TXT page numbers are **estimated** unless a TXT uses form-feed page breaks. PDF pages are real.
+- Scanned PDFs are rejected: there is no OCR.
+- There is **no authentication**. Don't expose a public instance with private documents.
+- Local-disk storage suits a demo and a single instance, not multi-user production. Most hosts need a persistent volume.
 
-## Future work
-Premium UI (shell, command palette, evidence viewer, conflict comparison), collections, insights charts, OCR, object storage, auth, streaming answers, evaluation set for retrieval quality.
+## Roadmap
 
-## AI / API disclosure
-Answers are generated by an Anthropic Claude model through the Anthropic API when `ANTHROPIC_API_KEY` is set. Embeddings use `all-MiniLM-L6-v2` (sentence-transformers). This codebase was written with AI assistance. The NovaTech documents are fictional.
+- [x] Ingestion, retrieval, grounded answers, citations, conflicts, insufficient evidence
+- [x] Basic workspace UI with 3D visuals and loading animation
+- [ ] App shell: collapsible sidebar, header, command palette (`⌘K`)
+- [ ] Side-by-side conflict comparison view
+- [ ] Document viewer with highlighted evidence
+- [ ] Collections, insights charts, settings, light/dark toggle
+- [ ] OCR, authentication, object storage, streaming answers
+
+## AI & API disclosure
+
+Answers are generated by an Anthropic Claude model through the Anthropic API when a key is configured. Embeddings come from `all-MiniLM-L6-v2` (sentence-transformers). This project was built with AI assistance. All NovaTech and Acme documents are fictional.
+
+---
+
+<div align="center">
+
+**Trust + intelligence + evidence + precision.**
+
+</div>
