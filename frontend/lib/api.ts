@@ -1,4 +1,6 @@
-export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const DEFAULT_API = "https://docusense-production-3ca8.up.railway.app";
+// Env var wins (set NEXT_PUBLIC_API_URL=http://localhost:8000 for local backend); trailing slashes are stripped.
+export const API = (process.env.NEXT_PUBLIC_API_URL || DEFAULT_API).replace(/\/+$/, "");
 
 export type Doc = { id: string; name: string; filename: string; type: string; pages: number; chunks: number; status: string; added_at: string; collection?: string | null };
 export type Evidence = { id: number; document: string; document_id: string; page: number; section: string; text: string; score: number; cited: boolean };
